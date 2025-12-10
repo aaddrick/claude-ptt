@@ -18,6 +18,7 @@
     "hands-free"
   ],
   "commands": "./commands/",
+  "skills": "./skills/",
   "mcpServers": {
     "ptt": {
       "command": "node",
