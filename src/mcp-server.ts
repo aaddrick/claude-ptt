@@ -108,6 +108,22 @@ const TOOLS: Tool[] = [
       properties: {},
     },
   },
+  {
+    name: 'ptt_start',
+    description: 'Start the PTT daemon (hotkey listener)',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'ptt_stop',
+    description: 'Stop the PTT daemon (hotkey listener)',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ];
 
 class PTTMCPServer {
@@ -370,6 +386,12 @@ class PTTMCPServer {
       case 'ptt_get_platform_info':
         return this.handleGetPlatformInfo(id);
 
+      case 'ptt_start':
+        return await this.handleStart(id);
+
+      case 'ptt_stop':
+        return this.handleStop(id);
+
       default:
         return {
           jsonrpc: '2.0',
@@ -506,6 +528,70 @@ class PTTMCPServer {
           {
             type: 'text',
             text: JSON.stringify(status, null, 2),
+          },
+        ],
+      },
+    };
+  }
+
+  private async handleStart(id: string | number): Promise<MCPResponse> {
+    if (this.state.isRunning) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: 'PTT daemon is already running',
+            },
+          ],
+        },
+      };
+    }
+
+    await this.startDaemon();
+
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: `PTT daemon started. Hotkey: ${this.config.hotkey}`,
+          },
+        ],
+      },
+    };
+  }
+
+  private handleStop(id: string | number): MCPResponse {
+    if (!this.state.isRunning) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: 'PTT daemon is not running',
+            },
+          ],
+        },
+      };
+    }
+
+    this.stopDaemon();
+
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: 'PTT daemon stopped',
           },
         ],
       },
