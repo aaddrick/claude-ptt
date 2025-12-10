@@ -1,0 +1,22 @@
+{
+  "name": "claude-ptt-marketplace",
+  "owner": {
+    "name": "Aaddrick Williams",
+    "email": "aaddrick@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "ptt",
+      "source": {
+        "source": "github",
+        "repo": "aaddrick/claude-ptt"
+      },
+      "version": "1.0.0",
+      "description": "Push-to-talk voice input for Claude Code. Hold Ctrl+Space to record, release to transcribe.",
+      "author": "Aaddrick Williams",
+      "homepage": "https://github.com/aaddrick/claude-ptt",
+      "license": "MIT",
+      "keywords": ["voice-input", "push-to-talk", "whisper", "accessibility"]
+    }
+  ]
+}

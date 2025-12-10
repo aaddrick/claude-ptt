@@ -1,0 +1,30 @@
+{
+  "name": "ptt",
+  "version": "1.0.0",
+  "description": "Push-to-talk voice input for Claude Code. Hold Ctrl+Space to record, release to transcribe and insert text.",
+  "author": {
+    "name": "Aaddrick Williams",
+    "email": "aaddrick@gmail.com"
+  },
+  "homepage": "https://github.com/aaddrick/claude-ptt",
+  "repository": "https://github.com/aaddrick/claude-ptt",
+  "license": "MIT",
+  "keywords": [
+    "voice-input",
+    "push-to-talk",
+    "speech-to-text",
+    "whisper",
+    "accessibility",
+    "hands-free"
+  ],
+  "commands": "./commands/",
+  "mcpServers": {
+    "ptt": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp-server.js"],
+      "env": {
+        "PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

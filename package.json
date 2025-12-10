@@ -1,0 +1,46 @@
+{
+  "name": "@aaddrick/claude-ptt",
+  "version": "1.0.0",
+  "description": "Push-to-talk voice input plugin for Claude Code",
+  "main": "dist/daemon.js",
+  "types": "dist/daemon.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/daemon.js",
+    "mcp-server": "node dist/mcp-server.js",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude-code",
+    "voice-input",
+    "push-to-talk",
+    "speech-to-text",
+    "whisper",
+    "accessibility"
+  ],
+  "author": {
+    "name": "Aaddrick Williams",
+    "email": "aaddrick@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aaddrick/claude-ptt.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.4",
+    "openai": "^4.77.0"
+  },
+  "optionalDependencies": {
+    "@nut-tree/nut-js": "^4.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  }
+}

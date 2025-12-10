@@ -1,0 +1,20 @@
+{
+  "hotkey": "Ctrl+Space",
+  "whisper": {
+    "openaiApiKey": null,
+    "localModelPath": null,
+    "preferredMode": "api",
+    "enableFallback": true,
+    "language": "en"
+  },
+  "audio": {
+    "sampleRate": 16000,
+    "silenceThreshold": 0.5
+  },
+  "keystroke": {
+    "waylandBackend": "wtype"
+  },
+  "feedback": {
+    "showRecordingIndicator": true
+  }
+}
