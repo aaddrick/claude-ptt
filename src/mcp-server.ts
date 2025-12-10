@@ -5,7 +5,7 @@
 import * as readline from 'readline';
 import { loadConfig, PTTConfig, updateConfig } from './config';
 import { detectPlatform, getKeystrokeDriver, KeystrokeDriver } from './keystroke/index';
-import { HotkeyListener } from './hotkey';
+import { createHotkeyListener, HotkeyListenerInterface, isWayland } from './hotkey/index';
 import { AudioRecorder } from './recorder';
 import { Transcriber } from './transcribe';
 
@@ -128,7 +128,7 @@ const TOOLS: Tool[] = [
 
 class PTTMCPServer {
   private config: PTTConfig;
-  private hotkeyListener: HotkeyListener;
+  private hotkeyListener: HotkeyListenerInterface | null = null;
   private recorder: AudioRecorder;
   private transcriber: Transcriber;
   private keystrokeDriver: KeystrokeDriver | null = null;
@@ -143,16 +143,16 @@ class PTTMCPServer {
 
   constructor() {
     this.config = loadConfig();
-    this.hotkeyListener = new HotkeyListener(this.config.hotkey);
+    // hotkeyListener is created in startDaemon() since it needs async platform detection
     this.recorder = new AudioRecorder({
       sampleRate: this.config.audio.sampleRate,
     });
     this.transcriber = new Transcriber(this.config);
-
-    this.setupEventHandlers();
   }
 
   private setupEventHandlers(): void {
+    if (!this.hotkeyListener) return;
+
     // Hotkey pressed - start recording
     this.hotkeyListener.on('hotkey:down', () => {
       this.startRecording();
@@ -164,7 +164,7 @@ class PTTMCPServer {
     });
 
     // Hotkey error
-    this.hotkeyListener.on('error', (error) => {
+    this.hotkeyListener.on('error', (error: Error) => {
       this.state.lastError = `Hotkey error: ${error.message}`;
       this.logError(this.state.lastError);
     });
@@ -179,7 +179,7 @@ class PTTMCPServer {
       this.state.isRecording = false;
     });
 
-    this.recorder.on('recording:error', (error) => {
+    this.recorder.on('recording:error', (error: Error) => {
       this.state.isRecording = false;
       this.state.lastError = `Recording error: ${error.message}`;
       this.logError(this.state.lastError);
@@ -258,7 +258,25 @@ class PTTMCPServer {
       return;
     }
 
-    this.logStatus(`Starting PTT daemon (hotkey: ${this.config.hotkey})...`);
+    const onWayland = isWayland();
+    this.logStatus(`Starting PTT daemon (hotkey: ${this.config.hotkey}, platform: ${onWayland ? 'Wayland' : 'X11/native'})...`);
+
+    // Create hotkey listener with platform-appropriate backend
+    try {
+      this.hotkeyListener = await createHotkeyListener(this.config.hotkey);
+      this.setupEventHandlers();
+
+      if (onWayland) {
+        this.logStatus('Using evdev-based hotkey listener for Wayland');
+        this.logStatus('Note: User must be in "input" group for hotkey detection');
+      } else {
+        this.logStatus('Using uiohook-napi for hotkey detection');
+      }
+    } catch (error) {
+      this.state.lastError = `Failed to create hotkey listener: ${(error as Error).message}`;
+      this.logError(this.state.lastError);
+      return;
+    }
 
     // Initialize keystroke driver
     try {
@@ -287,7 +305,9 @@ class PTTMCPServer {
     if (!this.state.isRunning) return;
 
     this.logStatus('Stopping PTT daemon...');
-    this.hotkeyListener.stop();
+    if (this.hotkeyListener) {
+      this.hotkeyListener.stop();
+    }
     this.recorder.cleanup();
     this.state.isRunning = false;
 
@@ -478,7 +498,7 @@ class PTTMCPServer {
     this.config = updateConfig(updates);
 
     // Update hotkey listener if hotkey changed
-    if (args.hotkey !== undefined) {
+    if (args.hotkey !== undefined && this.hotkeyListener) {
       this.hotkeyListener.setHotkey(String(args.hotkey));
     }
 

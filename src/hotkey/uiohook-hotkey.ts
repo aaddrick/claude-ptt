@@ -1,15 +1,22 @@
 /**
  * Global hotkey listener using uiohook-napi
+ * Works on Windows, macOS, and Linux X11
  * Documentation: https://github.com/snosme/uiohook-napi
+ *
+ * Usage:
+ * ```typescript
+ * import { uIOhook, UiohookKey } from 'uiohook-napi'
+ * uIOhook.on('keydown', (e) => {
+ *   if (e.keycode === UiohookKey.Q && e.ctrlKey) {
+ *     console.log('Ctrl+Q pressed')
+ *   }
+ * })
+ * uIOhook.start()
+ * ```
  */
 import { uIOhook, UiohookKey } from 'uiohook-napi';
 import { EventEmitter } from 'events';
-
-export interface HotkeyEvents {
-  'hotkey:down': () => void;
-  'hotkey:up': () => void;
-  'error': (error: Error) => void;
-}
+import type { HotkeyListenerInterface } from './index';
 
 interface ParsedHotkey {
   ctrl: boolean;
@@ -19,7 +26,7 @@ interface ParsedHotkey {
   key: number | null;
 }
 
-export class HotkeyListener extends EventEmitter {
+export class UiohookHotkeyListener extends EventEmitter implements HotkeyListenerInterface {
   private hotkey: string;
   private parsedHotkey: ParsedHotkey;
   private isHotkeyActive: boolean = false;
