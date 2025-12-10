@@ -5,6 +5,7 @@ import * as os from 'os';
 export interface WhisperConfig {
   openaiApiKey: string | null;
   localModelPath: string | null;
+  whisperExecutable: string | null;
   preferredMode: 'api' | 'local';
   enableFallback: boolean;
   language: string;
@@ -36,6 +37,7 @@ const DEFAULT_CONFIG: PTTConfig = {
   whisper: {
     openaiApiKey: null,
     localModelPath: null,
+    whisperExecutable: null,
     preferredMode: 'api',
     enableFallback: true,
     language: 'en',

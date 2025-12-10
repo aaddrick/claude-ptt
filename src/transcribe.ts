@@ -90,100 +90,74 @@ export class Transcriber {
   }
 
   private async transcribeLocal(audioPath: string): Promise<TranscriptionResult> {
-    const modelPath = this.config.whisper.localModelPath;
-    if (!modelPath) {
-      throw new Error('Local Whisper model path not configured');
+    const { localModelPath, whisperExecutable } = this.config.whisper;
+
+    if (!localModelPath && !whisperExecutable) {
+      throw new Error('Local Whisper not configured. Set localModelPath and/or whisperExecutable.');
     }
 
-    // Check if model path is a whisper.cpp executable or model file
-    const isWhisperCpp = modelPath.endsWith('main') || modelPath.includes('whisper.cpp');
-
-    if (isWhisperCpp) {
-      return await this.transcribeWithWhisperCpp(audioPath, modelPath);
+    // If we have an executable configured, use it with the model
+    if (whisperExecutable) {
+      return await this.transcribeWithWhisperCli(audioPath, whisperExecutable, localModelPath);
     }
 
-    // Assume it's a model file path for whisper.cpp
-    return await this.transcribeWithWhisperCppModel(audioPath, modelPath);
+    // If only model path is set, try to find whisper-cli in PATH
+    return await this.transcribeWithWhisperCli(audioPath, 'whisper-cli', localModelPath);
   }
 
-  private async transcribeWithWhisperCpp(
+  private async transcribeWithWhisperCli(
     audioPath: string,
-    executablePath: string
+    executablePath: string,
+    modelPath: string | null
   ): Promise<TranscriptionResult> {
     return new Promise((resolve, reject) => {
-      const args = [
+      const args: string[] = [];
+
+      // Add model path if specified
+      if (modelPath) {
+        args.push('-m', modelPath);
+      }
+
+      args.push(
         '-f', audioPath,
         '-l', this.config.whisper.language,
-        '--output-txt',
         '--no-timestamps',
-      ];
+        '--no-prints'  // Suppress progress output
+      );
 
-      const process = spawn(executablePath, args);
+      const proc = spawn(executablePath, args);
       let stdout = '';
       let stderr = '';
 
-      process.stdout.on('data', (data) => {
+      proc.stdout.on('data', (data) => {
         stdout += data.toString();
       });
 
-      process.stderr.on('data', (data) => {
+      proc.stderr.on('data', (data) => {
         stderr += data.toString();
       });
 
-      process.on('close', (code) => {
+      proc.on('close', (code) => {
         if (code === 0) {
+          // Clean up the output - whisper-cli outputs the transcription
+          const text = stdout
+            .split('\n')
+            .filter(line => !line.startsWith('[') && line.trim())
+            .join(' ')
+            .trim();
+
           resolve({
-            text: stdout.trim(),
+            text,
             source: 'local',
           });
         } else {
-          reject(new Error(`whisper.cpp failed: ${stderr}`));
+          reject(new Error(`whisper-cli failed (code ${code}): ${stderr || stdout}`));
         }
       });
 
-      process.on('error', reject);
-    });
-  }
-
-  private async transcribeWithWhisperCppModel(
-    audioPath: string,
-    modelPath: string
-  ): Promise<TranscriptionResult> {
-    return new Promise((resolve, reject) => {
-      // Assume whisper.cpp main executable is in PATH or same directory as model
-      const whisperPath = 'whisper';
-      const args = [
-        '-m', modelPath,
-        '-f', audioPath,
-        '-l', this.config.whisper.language,
-        '--output-txt',
-        '--no-timestamps',
-      ];
-
-      const process = spawn(whisperPath, args);
-      let stdout = '';
-      let stderr = '';
-
-      process.stdout.on('data', (data) => {
-        stdout += data.toString();
+      proc.on('error', (err) => {
+        reject(new Error(`Failed to run whisper-cli: ${err.message}`));
       });
-
-      process.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      process.on('close', (code) => {
-        if (code === 0) {
-          resolve({
-            text: stdout.trim(),
-            source: 'local',
-          });
-        } else {
-          reject(new Error(`whisper failed: ${stderr}`));
-        }
-      });
-
-      process.on('error', reject);
     });
   }
 
