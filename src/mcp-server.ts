@@ -1,10 +1,13 @@
 /**
- * MCP Server for PTT plugin configuration and status
- * Provides tools for getting/setting configuration and checking daemon status
+ * MCP Server for PTT plugin with integrated daemon
+ * Auto-starts hotkey listener when the MCP server loads
  */
 import * as readline from 'readline';
-import { loadConfig, saveConfig, PTTConfig, updateConfig } from './config';
-import { detectPlatform } from './keystroke/index';
+import { loadConfig, PTTConfig, updateConfig } from './config';
+import { detectPlatform, getKeystrokeDriver, KeystrokeDriver } from './keystroke/index';
+import { HotkeyListener } from './hotkey';
+import { AudioRecorder } from './recorder';
+import { Transcriber } from './transcribe';
 
 interface MCPRequest {
   jsonrpc: '2.0';
@@ -31,6 +34,14 @@ interface Tool {
     properties: Record<string, unknown>;
     required?: string[];
   };
+}
+
+interface DaemonState {
+  isRunning: boolean;
+  isRecording: boolean;
+  isTranscribing: boolean;
+  lastError: string | null;
+  lastTranscription: string | null;
 }
 
 const TOOLS: Tool[] = [
@@ -101,9 +112,175 @@ const TOOLS: Tool[] = [
 
 class PTTMCPServer {
   private config: PTTConfig;
+  private hotkeyListener: HotkeyListener;
+  private recorder: AudioRecorder;
+  private transcriber: Transcriber;
+  private keystrokeDriver: KeystrokeDriver | null = null;
+  private state: DaemonState = {
+    isRunning: false,
+    isRecording: false,
+    isTranscribing: false,
+    lastError: null,
+    lastTranscription: null,
+  };
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     this.config = loadConfig();
+    this.hotkeyListener = new HotkeyListener(this.config.hotkey);
+    this.recorder = new AudioRecorder({
+      sampleRate: this.config.audio.sampleRate,
+    });
+    this.transcriber = new Transcriber(this.config);
+
+    this.setupEventHandlers();
+  }
+
+  private setupEventHandlers(): void {
+    // Hotkey pressed - start recording
+    this.hotkeyListener.on('hotkey:down', () => {
+      this.startRecording();
+    });
+
+    // Hotkey released - stop recording and transcribe
+    this.hotkeyListener.on('hotkey:up', () => {
+      this.stopRecordingAndTranscribe();
+    });
+
+    // Hotkey error
+    this.hotkeyListener.on('error', (error) => {
+      this.state.lastError = `Hotkey error: ${error.message}`;
+      this.logError(this.state.lastError);
+    });
+
+    // Recording events
+    this.recorder.on('recording:start', () => {
+      this.state.isRecording = true;
+      this.logStatus('Recording...');
+    });
+
+    this.recorder.on('recording:stop', () => {
+      this.state.isRecording = false;
+    });
+
+    this.recorder.on('recording:error', (error) => {
+      this.state.isRecording = false;
+      this.state.lastError = `Recording error: ${error.message}`;
+      this.logError(this.state.lastError);
+    });
+  }
+
+  private logStatus(message: string): void {
+    // Log to stderr so it doesn't interfere with MCP protocol on stdout
+    process.stderr.write(`[PTT] ${message}\n`);
+  }
+
+  private logError(message: string): void {
+    process.stderr.write(`[PTT ERROR] ${message}\n`);
+  }
+
+  private startRecording(): void {
+    if (this.state.isRecording || this.state.isTranscribing) return;
+
+    try {
+      this.recorder.start();
+    } catch (error) {
+      this.state.lastError = `Failed to start recording: ${(error as Error).message}`;
+      this.logError(this.state.lastError);
+    }
+  }
+
+  private async stopRecordingAndTranscribe(): Promise<void> {
+    if (!this.state.isRecording) return;
+
+    try {
+      const audioPath = await this.recorder.stop();
+
+      if (!audioPath) {
+        this.state.lastError = 'No audio recorded';
+        this.logError(this.state.lastError);
+        return;
+      }
+
+      this.state.isTranscribing = true;
+      this.logStatus('Transcribing...');
+
+      const result = await this.transcriber.transcribe(audioPath);
+
+      this.state.isTranscribing = false;
+
+      if (result.text.trim()) {
+        this.state.lastTranscription = result.text.trim();
+        await this.typeText(result.text.trim());
+        this.logStatus(`Done: "${result.text.trim().substring(0, 50)}${result.text.length > 50 ? '...' : ''}"`);
+      } else {
+        this.state.lastError = 'No speech detected';
+        this.logError(this.state.lastError);
+      }
+    } catch (error) {
+      this.state.isTranscribing = false;
+      this.state.lastError = `Transcription error: ${(error as Error).message}`;
+      this.logError(this.state.lastError);
+    }
+  }
+
+  private async typeText(text: string): Promise<void> {
+    if (!this.keystrokeDriver) {
+      this.keystrokeDriver = await getKeystrokeDriver(this.config.keystroke);
+    }
+
+    const isAvailable = await this.keystrokeDriver.isAvailable();
+    if (!isAvailable) {
+      throw new Error('Keystroke driver not available');
+    }
+
+    await this.keystrokeDriver.type(text);
+  }
+
+  async startDaemon(): Promise<void> {
+    if (this.state.isRunning) {
+      return;
+    }
+
+    this.logStatus(`Starting PTT daemon (hotkey: ${this.config.hotkey})...`);
+
+    // Initialize keystroke driver
+    try {
+      this.keystrokeDriver = await getKeystrokeDriver(this.config.keystroke);
+      const isAvailable = await this.keystrokeDriver.isAvailable();
+      if (!isAvailable) {
+        this.logError('Warning: Keystroke driver not available. Text will not be typed.');
+      }
+    } catch (error) {
+      this.logError(`Warning: Could not initialize keystroke driver: ${(error as Error).message}`);
+    }
+
+    // Start hotkey listener
+    this.hotkeyListener.start();
+    this.state.isRunning = true;
+
+    // Cleanup old recordings periodically
+    this.cleanupInterval = setInterval(() => {
+      this.recorder.cleanup();
+    }, 60 * 60 * 1000);
+
+    this.logStatus('PTT daemon started. Press ' + this.config.hotkey + ' to record.');
+  }
+
+  stopDaemon(): void {
+    if (!this.state.isRunning) return;
+
+    this.logStatus('Stopping PTT daemon...');
+    this.hotkeyListener.stop();
+    this.recorder.cleanup();
+    this.state.isRunning = false;
+
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+
+    this.logStatus('PTT daemon stopped.');
   }
 
   async handleRequest(request: MCPRequest): Promise<MCPResponse> {
@@ -143,6 +320,11 @@ class PTTMCPServer {
   }
 
   private handleInitialize(id: string | number): MCPResponse {
+    // Auto-start the daemon when MCP initializes
+    this.startDaemon().catch((error) => {
+      this.logError(`Failed to auto-start daemon: ${error.message}`);
+    });
+
     return {
       jsonrpc: '2.0',
       id,
@@ -273,6 +455,14 @@ class PTTMCPServer {
 
     this.config = updateConfig(updates);
 
+    // Update hotkey listener if hotkey changed
+    if (args.hotkey !== undefined) {
+      this.hotkeyListener.setHotkey(String(args.hotkey));
+    }
+
+    // Update transcriber config
+    this.transcriber.updateConfig(this.config);
+
     return {
       jsonrpc: '2.0',
       id,
@@ -291,9 +481,17 @@ class PTTMCPServer {
     const platformInfo = detectPlatform();
 
     const status = {
+      daemon: {
+        isRunning: this.state.isRunning,
+        isRecording: this.state.isRecording,
+        isTranscribing: this.state.isTranscribing,
+        lastError: this.state.lastError,
+        lastTranscription: this.state.lastTranscription,
+      },
       configured: {
         apiKey: !!this.config.whisper.openaiApiKey || !!process.env.OPENAI_API_KEY,
         localModel: !!this.config.whisper.localModelPath,
+        whisperExecutable: !!this.config.whisper.whisperExecutable,
       },
       platform: platformInfo,
       hotkey: this.config.hotkey,
@@ -387,8 +585,23 @@ async function main() {
   });
 
   rl.on('close', () => {
+    server.stopDaemon();
+    process.exit(0);
+  });
+
+  // Handle graceful shutdown
+  process.on('SIGINT', () => {
+    server.stopDaemon();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
+    server.stopDaemon();
     process.exit(0);
   });
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  process.stderr.write(`[PTT] Fatal error: ${error.message}\n`);
+  process.exit(1);
+});
